@@ -1,1 +1,0 @@
-/run/current-system/sw/bin/g++ -g -Wl,--dependency-file=CMakeFiles/racing_competition.dir/link.d CMakeFiles/racing_competition.dir/main.cpp.o -o racing_competition

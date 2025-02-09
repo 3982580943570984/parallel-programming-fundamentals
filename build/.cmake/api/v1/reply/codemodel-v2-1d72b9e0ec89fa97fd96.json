@@ -1,0 +1,101 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"jsonFile" : "directory-.-Debug-f5ebdc15457944623624.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.31"
+					},
+					"projectIndex" : 0,
+					"source" : "."
+				},
+				{
+					"build" : "gas_station",
+					"jsonFile" : "directory-gas_station-Debug-3d64725054881df6c90f.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.31"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "gas_station",
+					"targetIndexes" : 
+					[
+						0
+					]
+				},
+				{
+					"build" : "racing_competition",
+					"jsonFile" : "directory-racing_competition-Debug-8beb4818a560716f5a26.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.31"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "racing_competition",
+					"targetIndexes" : 
+					[
+						1
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "parallel_programming",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "gas_station::@e56d25290088e7da2d64",
+					"jsonFile" : "target-gas_station-Debug-ee59c3e5bb1a54d2fa85.json",
+					"name" : "gas_station",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "racing_competition::@195314416b6a43f9a391",
+					"jsonFile" : "target-racing_competition-Debug-5aed9db9a6024740a5e9.json",
+					"name" : "racing_competition",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/nixos/parallel-programming/build",
+		"source" : "/home/nixos/parallel-programming"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 7
+	}
+}

@@ -1,0 +1,8 @@
+/home/nixos/parallel-programming/build/CMakeFiles/edit_cache.dir
+/home/nixos/parallel-programming/build/CMakeFiles/rebuild_cache.dir
+/home/nixos/parallel-programming/build/gas_station/CMakeFiles/gas_station.dir
+/home/nixos/parallel-programming/build/gas_station/CMakeFiles/edit_cache.dir
+/home/nixos/parallel-programming/build/gas_station/CMakeFiles/rebuild_cache.dir
+/home/nixos/parallel-programming/build/racing_competition/CMakeFiles/racing_competition.dir
+/home/nixos/parallel-programming/build/racing_competition/CMakeFiles/edit_cache.dir
+/home/nixos/parallel-programming/build/racing_competition/CMakeFiles/rebuild_cache.dir

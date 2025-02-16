@@ -1,5 +1,4 @@
-#include <sys/mman.h>
-#include <sys/types.h>
+#include <sys/msg.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -9,14 +8,17 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
-#include <mutex>
+#include <iterator>
 #include <print>
+#include <random>
+#include <ranges>
 
 namespace
 {
 constexpr auto number_of_stages { 3 };
-constexpr auto number_of_cars { 5 };
+constexpr auto cars_number { 5 };
 constexpr auto finish_line { 100 };
 constexpr auto track_length { 50 };
 
@@ -24,87 +26,62 @@ std::atomic_bool start_flag {};
 std::atomic_bool next_flag {};
 }  // namespace
 
-template <typename T>
-class MemoryMapping
+struct ProgressMessage
 {
- public:
-  explicit MemoryMapping()
-  {
-    const auto raw_memory {
-      mmap(nullptr, sizeof(T), PROT_READ | PROT_WRITE,
-           MAP_SHARED | MAP_ANONYMOUS, -1, 0),
-    };
-
-    if (raw_memory == MAP_FAILED)
-    {
-      std::perror("mmap failed");
-      std::exit(1);
-    }
-
-    object = new (raw_memory) T;
-  }
-
-  ~MemoryMapping() { munmap(object, sizeof(T)); }
-
-  [[nodiscard]] T* get() const { return object; }
-
-  T* operator->() const { return object; }
-
-  T& operator*() const { return *object; }
-
- private:
-  T* object {};
-};
-
-struct Race
-{
-  int current_stage {};
-  int finish_order_counter {};
-  std::mutex mutex {};
+  long mtype { 1 };
+  int id {};
+  int progress {};
+  int finished {};
 };
 
 class Car
 {
  public:
-  void start(Race* race)
+  void start(int id, int queue)
   {
     signal(SIGUSR1, [](int) { start_flag = true; });
     signal(SIGUSR2, [](int) { next_flag = true; });
 
-    srand(time(nullptr) ^ (getpid() << 16));
+    std::mt19937 generator(std::random_device {}());
+    std::uniform_int_distribution<> step_dist(1, 10);
+    std::uniform_int_distribution<> sleep_dist(100, 300);
 
-    for (auto stage { 1 }; stage <= number_of_stages; ++stage)
+    for (int stage { 1 }; stage <= number_of_stages; ++stage)
     {
       while (!start_flag) pause();
       start_flag = false;
 
+      progress = 0;
+      finished = false;
+      order = 0;
+
       while (progress < finish_line)
       {
-        const auto step { rand() % 10 + 1 };
-        progress += step;
+        progress = std::min(progress + step_dist(generator), finish_line);
 
-        if (progress > finish_line) progress = finish_line;
+        ProgressMessage message {
+          .id = id,
+          .progress = progress,
+        };
+        msgsnd(queue, &message, sizeof(message) - sizeof(long), 0);
 
-        const auto sleep_time { (rand() % 200 + 100) * 1000 };
-        usleep(sleep_time);
+        usleep(sleep_dist(generator) * 1000);
       }
 
-      {
-        std::lock_guard guard { race->mutex };
-        ++race->finish_order_counter;
-        order = race->finish_order_counter;
-      }
-
-      finished = true;
+      ProgressMessage message {
+        .id = id,
+        .progress = progress,
+        .finished = 1,
+      };
+      msgsnd(queue, &message, sizeof(message) - sizeof(long), 0);
 
       if (stage == number_of_stages) continue;
 
       while (!next_flag) pause();
       next_flag = false;
     }
-  };
+  }
 
- public:
   int progress {};
   int order {};
   int points {};
@@ -114,24 +91,20 @@ class Car
 class Arbiter
 {
  public:
-  auto prepare()
-  {
-    for (auto i { 0 }; i < number_of_cars; ++i)
-    {
-      const auto process { fork() };
+  ~Arbiter() { msgctl(progress_queue, IPC_RMID, nullptr); }
 
-      if (process < 0)
-      {
-        std::perror("fork failed");
-        std::exit(1);
-      }
+  void prepare()
+  {
+    for (auto i { 0 }; i < cars_number; ++i)
+    {
+      auto const process { fork() };
 
       if (process == 0)
       {
         if (i == 0) process_group = getpid();
         setpgid(0, process_group);
 
-        cars->at(i).start(race.get());
+        cars.at(i).start(i, progress_queue);
         std::exit(0);
       }
 
@@ -142,14 +115,14 @@ class Arbiter
     }
   }
 
-  auto start()
+  void start()
   {
-    for (auto stage { 1 }; stage <= number_of_stages; ++stage)
+    for (int stage { 1 }; stage <= number_of_stages; ++stage)
     {
-      race->current_stage = stage;
-      race->finish_order_counter = 0;
+      current_stage = stage;
+      finish_order_counter = 0;
 
-      for (auto& car : *cars)
+      for (auto& car : cars)
         car = {
           .progress = 0,
           .order = 0,
@@ -157,20 +130,34 @@ class Arbiter
           .finished = false,
         };
 
-      std::println("Preparing Stage {}", stage);
+      std::println("Подготовка этапа {}", stage);
       sleep(1);
 
       kill(-process_group, SIGUSR1);
 
-      auto finished_count { 0 };
-      while (finished_count < cars->size())
+      unsigned int finished_count {};
+      while (finished_count < cars.size())
       {
+        ProgressMessage message {};
+
+        while (msgrcv(progress_queue, &message, sizeof(message) - sizeof(long),
+                      0, IPC_NOWAIT) > 0)
+        {
+          auto& car { cars.at(message.id) };
+
+          car.progress = message.progress;
+
+          if (message.finished && !car.finished)
+          {
+            car.finished = true;
+            car.order = ++finish_order_counter;
+            car.points += car.order;
+          }
+        }
+
+        finished_count = std::ranges::count_if(cars, &Car::finished);
+
         display_progress();
-
-        finished_count = 0;
-
-        for (const auto& car : *cars)
-          if (car.finished) ++finished_count;
 
         usleep(200000);
       }
@@ -179,11 +166,11 @@ class Arbiter
 
       if (stage == number_of_stages)
       {
-        std::println("Race finished");
+        std::println("Гонка завершена");
         continue;
       }
 
-      std::println("\nPress Enter to start the next stage...");
+      std::println("\nНажмите Enter для начала следующего этапа...");
       std::cin.ignore();
 
       kill(-process_group, SIGUSR2);
@@ -191,35 +178,30 @@ class Arbiter
 
     display_results();
 
-    for (const auto& process : processes) waitpid(process, nullptr, 0);
+    for (auto const& process : processes) waitpid(process, nullptr, 0);
   }
 
  private:
   void display_progress() const
   {
     std::print("\033[2J\033[1;1H");
-    std::print("Stage {} Progress:\n", race->current_stage);
+    std::println("Прогресс этапа {}:", current_stage);
 
-    for (auto i { 0 }; const auto& car : *cars)
+    for (int i {}; auto const& car : cars)
     {
-      int progress = car.progress;
-      int bar = (progress * track_length) / finish_line;
+      std::string bar(track_length, '.');
 
-      std::string progress_bar {};
-      progress_bar.reserve(track_length);
+      int pos { (car.progress * track_length) / finish_line };
 
-      for (int j = 0; j < track_length; ++j)
-      {
-        (j < bar)    ? progress_bar.push_back('=')
-        : (j == bar) ? progress_bar.push_back('>')
-                     : progress_bar.push_back('.');
-      }
+      std::fill_n(bar.begin(), std::min(pos, track_length), '=');
 
-      std::print("Car {} : [{}] {} / {}", (++i), progress_bar, progress,
+      if (pos < track_length) bar.at(pos) = '>';
+
+      std::print("Машина {} : [{}] {} / {}", (++i), bar, car.progress,
                  finish_line);
 
       if (car.finished)
-        std::println(" (Finished, order: {})", car.order);
+        std::println(" (Финишировала с местом: {})", car.order);
       else
         std::println();
     }
@@ -227,60 +209,47 @@ class Arbiter
 
   void display_points() const
   {
-    for (auto& car : *cars) car.points += car.order;
+    std::println("\nРезультаты этапа:", current_stage);
 
-    std::array<int, number_of_cars> order_indices {};
-    for (int i = 0; i < number_of_cars; i++) order_indices[i] = i;
+    std::array<Car const*, cars_number> orders {};
 
-    std::ranges::sort(order_indices, [this](int a, int b) {
-      return cars->at(a).order < cars->at(b).order;
-    });
+    for (auto [ordered_car, car] : std::ranges::zip_view { orders, cars })
+      ordered_car = &car;
 
-    std::print("\nStage {} Results:\n", race->current_stage);
-    std::print("Rank\tCar\tFinish Order\tStage Points\tTotal Points\n");
+    std::ranges::sort(orders, std::ranges::less {}, &Car::order);
 
-    for (int i = 0; i < number_of_cars; i++)
-    {
-      const auto idx { order_indices[i] };
-      const auto car { cars->at(idx) };
-
-      int stage_points = cars->at(idx).order;
-
-      std::print("{}\tCar {}\t{}\t\t{}\t\t{}\n", i + 1, idx + 1,
-                 cars->at(idx).order, stage_points, cars->at(idx).points);
-    }
+    for (int i {}; auto order : orders)
+      std::println("Место {}: Машина {} (Очки: {})", ++i,
+                   std::distance(cars.begin(), order) + 1, order->points);
   }
 
   void display_results() const
   {
-    std::array<int, number_of_cars> order_indices {};
-    for (int i = 0; i < number_of_cars; i++) order_indices[i] = i;
+    std::println("\nИтоговые результаты:");
 
-    std::ranges::sort(order_indices, [this](int a, int b) {
-      return cars->at(a).points < cars->at(b).points;
-    });
+    std::array<Car const*, cars_number> scores {};
 
-    std::print("\nFinal Race Results:\n");
-    std::print("Rank\tCar\tTotal Points\n");
+    for (auto [score, car] : std::ranges::zip_view { scores, cars })
+      score = &car;
 
-    for (int i = 0; i < number_of_cars; i++)
-    {
-      const auto idx { order_indices[i] };
-      std::print("{}\tCar {}\t{}\n", i + 1, idx + 1, cars->at(idx).points);
-    }
+    std::ranges::sort(scores, std::ranges::less {}, &Car::points);
+
+    for (int i {}; auto car : scores)
+      std::println("Место {}: Машина {} (Всего очков: {})", ++i,
+                   std::distance(cars.data(), car) + 1, car->points);
   }
 
- private:
+  std::array<pid_t, cars_number> processes {};
   pid_t process_group {};
-  std::array<pid_t, number_of_cars> processes {};
 
-  MemoryMapping<Race> race {};
-  MemoryMapping<std::array<Car, number_of_cars>> cars {};
+  int progress_queue { msgget(IPC_PRIVATE, IPC_CREAT | 0666) };
+
+  int current_stage {};
+  int finish_order_counter {};
+  std::array<Car, cars_number> cars {};
 };
 
-// TODO: use modern random facilities
-
-int main(int argc, char** argv)
+int main()
 {
   Arbiter arbiter {};
   arbiter.prepare();

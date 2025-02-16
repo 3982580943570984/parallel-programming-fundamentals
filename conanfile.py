@@ -7,7 +7,9 @@ class Recipe(ConanFile):
     generators = "CMakeDeps", "CMakeToolchain"
 
     def requirements(self):
+        self.requires("boost/1.86.0")
         self.requires("nlohmann_json/3.11.3")
+        self.requires("openmpi/4.1.6")
 
     def layout(self):
         cmake_layout(self)

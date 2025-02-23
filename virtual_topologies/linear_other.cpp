@@ -25,15 +25,19 @@ int main(int argc, char** argv)
              std::ranges::to<std::vector<double>>();
   }
 
-  std::vector<double> transposed_matrix(matrix.size());
+  MPI_Scatter(matrix.data(), size, MPI_DOUBLE, column.data(), column.size(),
+              MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  if (rank == 0)
-    for (int i {}; i < size; ++i)
-      for (int j {}; j < size; ++j)
-        transposed_matrix[j * size + i] = matrix[i * size + j];
+  double vector_element {};
+  MPI_Scatter(vector.data(), 1, MPI_DOUBLE, &vector_element, 1, MPI_DOUBLE, 0,
+              MPI_COMM_WORLD);
 
-  MPI_Scatter(transposed_matrix.data(), size, MPI_DOUBLE, column.data(),
-              column.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  auto const multiplication {
+    column | std::views::transform([&](auto const& column_element) {
+      return column_element * vector_element;
+    }) |
+    std::ranges::to<std::vector<double>>()
+  };
 
   MPI_Comm communicator {};
   int dimensions[] { size }, periods[] { 0 };
@@ -42,29 +46,27 @@ int main(int argc, char** argv)
   int previous_rank {}, next_rank {};
   MPI_Cart_shift(communicator, 0, 1, &previous_rank, &next_rank);
 
-  double result {};
+  std::vector<double> results(size);
 
   for (int i {}; i < size; ++i)
   {
-    double element {};
+    double previous {};
 
-    rank == 0 ? element = vector[i]
-              : MPI_Recv(&element, 1, MPI_DOUBLE, previous_rank, 0,
-                         communicator, MPI_STATUS_IGNORE);
+    if (rank != 0)
+      MPI_Recv(&previous, 1, MPI_DOUBLE, previous_rank, 0, communicator,
+               MPI_STATUS_IGNORE);
 
-    result += column[i] * element;
+    double result { previous + multiplication.at(i) };
 
     if (next_rank > 0)
-      MPI_Send(&element, 1, MPI_DOUBLE, next_rank, 0, communicator);
+      MPI_Send(&result, 1, MPI_DOUBLE, next_rank, 0, communicator);
+
+    if (rank == 4) results.at(i) = result;
   }
 
-  std::vector<double> results(size);
-  MPI_Gather(&result, 1, MPI_DOUBLE, results.data(), 1, MPI_DOUBLE, 0,
-             communicator);
-
-  if (rank == 0)
+  if (rank == 4)
   {
-    std::print("Result (Linear): ");
+    std::print("Result (Ring): ");
 
     for (double result : results) std::print("{} ", result);
 

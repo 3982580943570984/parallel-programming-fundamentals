@@ -56,11 +56,11 @@ int main(int argc, char** argv)
 
   std::array<double, 6> local {};
 
-  for (auto const& [i, column] : enumerate(transposed | chunk(5)))
+  for (auto const& [result, column] : zip(local, transposed | chunk(5)))
   {
     MPI_Bcast(column.data(), column.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    for (auto const& [a, b] : zip(row, column)) local.at(i) += a * b;
+    for (auto const& [a, b] : zip(row, column)) result += a * b;
   }
 
   MPI_Gather(local.data(), local.size(), MPI_DOUBLE, C.data(), local.size(),

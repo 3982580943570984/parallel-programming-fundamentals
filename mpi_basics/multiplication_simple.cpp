@@ -2,6 +2,8 @@
 
 #include <array>
 #include <print>
+#include <ranges>
+#include <vector>
 
 // A: {{1,2,3,4,5},{6,7,8,9,10},{11,12,13,14,15},{16,17,18,19,20}}
 // B: {{1,2,3,4,5,6},{7,8,9,10,11,12},{13,14,15,16,17,18},{19,20,21,22,23,24},{25,26,27,28,29,30}}
@@ -9,6 +11,9 @@
 
 int main(int argc, char** argv)
 {
+  using namespace std::views;
+  using namespace std::ranges;
+
   MPI_Init(&argc, &argv);
 
   int rank {};
@@ -17,51 +22,56 @@ int main(int argc, char** argv)
   int size {};
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-  std::array<double, 20> A {};  // 4*5
+  std::vector<double> A {}, B {}, C(4 * 6);  // 4*5, 5*6, 4*6
 
-  std::array<double, 30> B {};  // 5*6
+  std::vector<double> transposed(6 * 5);
 
   if (rank == 0)
   {
-    for (int i {}; i < 20; ++i) A[i] = i + 1;
+    A = iota(1) | take(4 * 5) | to<std::vector<double>>();
+
+    B = iota(1) | take(5 * 6) | to<std::vector<double>>();
+
+    for (int i {}; i < 5; ++i)
+      for (int j {}; j < 6; ++j) transposed[j * 5 + i] = B[i * 6 + j];
 
     std::println("Матрица A (4x5):");
-    for (int i {}; i < 4; ++i)
+    for (auto const& row : A | chunk(5))
     {
-      for (int j {}; j < 5; ++j) std::print("{}\t", A[i * 5 + j]);
+      for (auto const& value : row) std::print("{}\t", value);
       std::println();
     }
 
-    for (int i {}; i < 30; ++i) B[i] = i + 1;
-
     std::println("Матрица B (5x6):");
-    for (int i {}; i < 5; ++i)
+    for (auto const& row : B | chunk(6))
     {
-      for (int j {}; j < 6; ++j) std::print("{}\t", B[i * 6 + j]);
+      for (auto const& value : row) std::print("{}\t", value);
       std::println();
     }
   }
 
-  std::array<double, 5> A_row {};
-  MPI_Scatter(A.data(), A_row.size(), MPI_DOUBLE, A_row.data(), A_row.size(),
+  std::array<double, 5> row {};
+  MPI_Scatter(A.data(), row.size(), MPI_DOUBLE, row.data(), row.size(),
               MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  MPI_Bcast(B.data(), B.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  std::array<double, 6> local {};
 
-  std::array<double, 6> C_row {};
-  for (int j {}; j < 6; ++j)
-    for (int k {}; k < 5; ++k) C_row[j] += A_row[k] * B[k * 6 + j];
+  for (auto const& [i, column] : enumerate(transposed | chunk(5)))
+  {
+    MPI_Bcast(column.data(), column.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  std::array<double, 24> C {};  // 4*6
-  MPI_Gather(C_row.data(), C_row.size(), MPI_DOUBLE, C.data(), C_row.size(),
+    for (auto const& [a, b] : zip(row, column)) local.at(i) += a * b;
+  }
+
+  MPI_Gather(local.data(), local.size(), MPI_DOUBLE, C.data(), local.size(),
              MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   if (rank == 0)
   {
     std::println("Матрица C (4x6):");
-    for (int row {}; row < 4; ++row)
+    for (auto const& row : C | chunk(6))
     {
-      for (int col {}; col < 6; ++col) std::print("{}\t", C[row * 6 + col]);
+      for (auto const& value : row) std::print("{}\t", value);
       std::println();
     }
   }

@@ -12,7 +12,7 @@
 int main(int argc, char** argv)
 {
   using namespace std::views;
-  using namespace std::ranges;
+  using std::ranges::to;
 
   MPI_Init(&argc, &argv);
 

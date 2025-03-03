@@ -212,12 +212,14 @@ struct Generator
 {
   static void generate();
 
-  static constexpr auto requests { 150 };
+  static inline auto requests { 150 };
 
-  static constexpr auto mean_generation_time { 1 };
+  static inline auto mean_generation_time { 1 };
 
-  static constexpr auto standard_deviation { 0.5 };
+  static inline auto standard_deviation { 0.5 };
 };
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Generator, requests, mean_generation_time, standard_deviation);
 
 auto const queue { SharedMemory<Queue> {} };
 
@@ -308,6 +310,37 @@ void Column::serve(int index) const
         std::chrono::duration<double>(distribution(number_generator)));
   }
 
+  while (true)
+  {
+    queue->lock();
+    bool has_car = std::any_of(queue->cars.begin(), queue->cars.begin() + queue->current_size,
+                               [&](const Car& c) { return c.fuel == fuel; });
+    queue->unlock();
+
+    if (!has_car)
+      break;
+
+    auto car = queue->find_nearest_car(fuel);
+    if (car)
+    {
+      const auto formatted_string { std::format(
+          "Колонка {} начала обслуживание машины с номером {} и "
+          "типом топлива {} во временной метке {:%Y-%m-%d "
+          "%H:%M:%S}",
+          index, car->id, car->fuel, car->timestamp) };
+
+      std::println("{}", formatted_string);
+      std::println(log, "{}", formatted_string), std::fflush(log);
+
+      std::this_thread::sleep_for(
+          std::chrono::duration<double>(distribution(number_generator)));
+    }
+    else
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
   std::fclose(log);
 }
 
@@ -316,6 +349,8 @@ int main(int argc, char** argv)
   nlohmann::json configuration {};
   std::ifstream { argv[1] } >> configuration;
   columns = configuration["columns"].get<std::array<Column, 5>>();
+
+  configuration["generator"].get<Generator>();
 
   std::vector<pid_t> pids;
 
@@ -331,6 +366,9 @@ int main(int argc, char** argv)
   }
 
   Generator::generate();
+
+  for (const auto& column : columns)
+    sem_post(&queue->fuel_semaphores[std::to_underlying(column.fuel)]);
 
   for (auto const& pid : pids) waitpid(pid, nullptr, 0);
 }

@@ -72,9 +72,12 @@ int main(int argc, char** argv)
 
   if (rank == 0)
   {
-    for (auto& value : array)
-      MPI_Recv(&value, 1, MPI_INT, MPI_ANY_SOURCE, 0, communicator,
-               MPI_STATUS_IGNORE);
+    auto const sources {
+      iota(dimensions[0] - 1, size) | stride(dimensions[0]) | to<std::vector>(),
+    };
+
+    for (auto const& [value, source] : zip(array, sources))
+      MPI_Recv(&value, 1, MPI_INT, source, 0, communicator, MPI_STATUS_IGNORE);
 
     std::print("Результирующий массив: ");
     for (auto const& element : array) std::print("{} ", element);
